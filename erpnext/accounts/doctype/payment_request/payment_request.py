@@ -1,7 +1,7 @@
 import json
 
 import frappe
-from frappe import _
+from frappe import _, qb
 from frappe.model.document import Document
 from frappe.query_builder.functions import Sum
 from frappe.utils import flt, nowdate
@@ -563,10 +563,12 @@ def make_payment_request(**args):
 	existing_payment_request_amount = get_existing_payment_request_amount(ref_doc.doctype, ref_doc.name)
 
 	if existing_payment_request_amount:
-		grand_total -= existing_payment_request_amount
-
-		if not grand_total:
-			frappe.throw(_("Payment Request is already created"))
+		if args.order_type == "Shopping Cart":
+			cancel_old_payment_requests(ref_doc.doctype, ref_doc.name)
+		else:
+			grand_total -= existing_payment_request_amount
+			if not grand_total:
+				frappe.throw(_("Payment Request is already created"))
 
 	if draft_payment_request:
 		frappe.db.set_value(
@@ -679,6 +681,24 @@ def get_amount(ref_doc, payment_account=None):
 		return flt(grand_total, get_currency_precision())
 	else:
 		frappe.throw(_("Payment Entry is already created"))
+
+
+def cancel_old_payment_requests(ref_dt, ref_dn):
+	PR = frappe.qb.DocType("Payment Request")
+
+	if res := (
+		frappe.qb.from_(PR)
+		.select(PR.name)
+		.where(PR.reference_doctype == ref_dt)
+		.where(PR.reference_name == ref_dn)
+		.where(PR.docstatus == 1)
+		.where(PR.status.isin(["Draft", "Requested"]))
+		.run(as_dict=True)
+	):
+		for x in res:
+			doc = frappe.get_doc("Payment Request", x.name)
+			doc.flags.ignore_permissions = True
+			doc.cancel()
 
 
 def get_existing_payment_request_amount(ref_dt, ref_dn):
@@ -913,3 +933,19 @@ def get_open_payment_requests_query(doctype, txt, searchfield, start, page_len, 
 		)
 		for pr in open_payment_requests
 	]
+
+
+def clear_integration_requests_of_cancelled_payment_requests():
+	pr = qb.DocType("Payment Request")
+	if payment_requests := qb.from_(pr).select(pr.name).where(pr.docstatus.eq(2)).run(as_list=True):
+		payment_requests = [x[0] for x in payment_requests]
+		integration_requests = frappe.db.get_all(
+			"Integration Request",
+			{
+				"reference_doctype": "Payment Request",
+				"reference_docname": ["in", payment_requests],
+				"status": "Queued",
+			},
+		)
+		for ireq in integration_requests:
+			frappe.delete_doc("Integration Request", ireq.name, force=1)
