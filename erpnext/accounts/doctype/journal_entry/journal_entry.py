@@ -262,7 +262,7 @@ class JournalEntry(AccountsController):
 			frappe.throw(_("Journal Entry type should be set as Depreciation Entry for asset depreciation"))
 
 	def validate_stock_accounts(self):
-		stock_accounts = get_stock_accounts(self.company, accounts=self.accounts)
+		stock_accounts = get_stock_accounts(self.company, self.doctype, self.name)
 		for account in stock_accounts:
 			account_bal, stock_bal, warehouse_list = get_stock_and_account_balance(
 				account, self.posting_date, self.company
@@ -1673,6 +1673,8 @@ def make_reverse_journal_entry(source_name, target_doc=None):
 					"debit": "credit",
 					"credit_in_account_currency": "debit_in_account_currency",
 					"credit": "debit",
+					"reference_type": "reference_type",
+					"reference_name": "reference_name"
 				},
 			},
 		},
